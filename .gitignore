@@ -1,3 +1,4 @@
 vendor/*
 dist/*
+copy-docker-image
 !vendor/vendor.json
