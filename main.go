@@ -57,12 +57,13 @@ func moveLayerUsingFile(srcHub *registry.Registry, destHub *registry.Registry, s
 }
 
 func migrateLayer(srcHub *registry.Registry, destHub *registry.Registry, srcRepo string, destRepo string, layer distribution.Descriptor) error {
-	fmt.Println("Checking if manifest layer exists in destiation registery")
+
+	srcHub.Logf("Checking if manifest layer exists in destination registry")
 
 	layerDigest := layer.Digest
 	hasLayer, err := destHub.HasLayer(destRepo, layerDigest)
 	if err != nil {
-		return fmt.Errorf("Failure while checking if the destiation registry contained an image layer. %v", err)
+		return fmt.Errorf("Failure while checking if the destination registry contained an image layer. %v", err)
 	}
 
 	if !hasLayer {
@@ -82,7 +83,7 @@ func migrateLayer(srcHub *registry.Registry, destHub *registry.Registry, srcRepo
 		return err
 	}
 
-	fmt.Println("Layer already exists in the destination")
+	srcHub.Logf("Layer already exists in the destination")
 	return nil
 
 }
@@ -93,11 +94,28 @@ func copyImage(srcHub *registry.Registry, destHub *registry.Registry, repository
 	if err != nil {
 		return -1, fmt.Errorf("Failed to fetch the manifest for %s/%s:%s. %v", srcHub.URL, repository, tag, err)
 	}
+
+	resp, err := manifest.MarshalJSON()
+
+	srcHub.Logf(string(resp))
+
+	//Migrate config object first
+	err = migrateLayer(srcHub, destHub, repository, repository, manifest.Config)
+	if err != nil {
+		return -1, fmt.Errorf("Failed to migrate image layer. %v", err)
+	}
+
 	for _, layer := range manifest.Layers {
+		srcHub.Logf("Uploading Layer: %s", layer.Digest)
 		err := migrateLayer(srcHub, destHub, repository, repository, layer)
 		if err != nil {
 			return -1, fmt.Errorf("Failed to migrate image layer. %v", err)
 		}
+	}
+
+	err = destHub.PutManifestV2(repository, tag, manifest)
+	if err != nil {
+		return -1, fmt.Errorf("Failed to upload manifest to %s/%s:%s. %v", destHub.URL, repository, tag, err)
 	}
 
 	/*
@@ -107,7 +125,7 @@ func copyImage(srcHub *registry.Registry, destHub *registry.Registry, repository
 			return -1, fmt.Errorf("Failed to upload manifest to %s/%s:%s. %v", destHub.URL, repository, tag, err)
 		}
 	*/
-	fmt.Printf("Copied Docker Image %s:%s successfully.", repository, tag)
+	fmt.Printf("Copied Docker Image %s:%s successfully.\n", repository, tag)
 	return 0, nil
 }
 
