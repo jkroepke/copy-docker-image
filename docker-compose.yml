@@ -1,0 +1,22 @@
+version: '2'
+services:
+  nexus1:
+    image: sonatype/nexus3
+    ports:
+    - 8081:8081
+    - 5001:5000
+  nexus2:
+    image: sonatype/nexus3
+    ports:
+    - 8082:8081
+    - 5002:5000
+  nexus2-rp:
+    image: nginx:alpine
+    volumes:
+    - ./registry.conf:/etc/nginx/conf.d/registry.conf:ro
+    ports:
+    - 5003:5003
+  docker-registry:
+    image: registry:2
+    ports:
+    - 5004:5000

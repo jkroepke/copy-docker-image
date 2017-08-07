@@ -19,15 +19,17 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"strings"
 
 	"github.com/alecthomas/kingpin"
-	"github.com/docker/distribution/manifest/schema1"
+	"github.com/docker/distribution"
 	"github.com/fsouza/go-dockerclient"
 	"github.com/heroku/docker-registry-client/registry"
 )
 
-func moveLayerUsingFile(srcHub *registry.Registry, destHub *registry.Registry, srcRepo string, destRepo string, layer schema1.FSLayer, file *os.File) error {
-	layerDigest := layer.BlobSum
+func moveLayerUsingFile(srcHub *registry.Registry, destHub *registry.Registry, srcRepo string, destRepo string, layer distribution.Descriptor, file *os.File) error {
+
+	layerDigest := layer.Digest
 
 	srcImageReader, err := srcHub.DownloadLayer(srcRepo, layerDigest)
 	if err != nil {
@@ -54,17 +56,17 @@ func moveLayerUsingFile(srcHub *registry.Registry, destHub *registry.Registry, s
 	return nil
 }
 
-func migrateLayer(srcHub *registry.Registry, destHub *registry.Registry, srcRepo string, destRepo string, layer schema1.FSLayer) error {
+func migrateLayer(srcHub *registry.Registry, destHub *registry.Registry, srcRepo string, destRepo string, layer distribution.Descriptor) error {
 	fmt.Println("Checking if manifest layer exists in destiation registery")
 
-	layerDigest := layer.BlobSum
+	layerDigest := layer.Digest
 	hasLayer, err := destHub.HasLayer(destRepo, layerDigest)
 	if err != nil {
 		return fmt.Errorf("Failure while checking if the destiation registry contained an image layer. %v", err)
 	}
 
 	if !hasLayer {
-		fmt.Println("Need to upload layer", layerDigest, "to the destiation")
+		fmt.Println("Need to upload layer", layerDigest, "to the destination")
 		tempFile, err := ioutil.TempFile("", "docker-image")
 		if err != nil {
 			return fmt.Errorf("Failure while a creating temporary file for an image layer download. %v", err)
@@ -85,6 +87,33 @@ func migrateLayer(srcHub *registry.Registry, destHub *registry.Registry, srcRepo
 
 }
 
+func copyImage(srcHub *registry.Registry, destHub *registry.Registry, repository string, tag string) (int, error) {
+
+	manifest, err := srcHub.ManifestV2(repository, tag)
+	if err != nil {
+		return -1, fmt.Errorf("Failed to fetch the manifest for %s/%s:%s. %v", srcHub.URL, repository, tag, err)
+	}
+	for _, layer := range manifest.Layers {
+		err := migrateLayer(srcHub, destHub, repository, repository, layer)
+		if err != nil {
+			return -1, fmt.Errorf("Failed to migrate image layer. %v", err)
+		}
+	}
+
+	/*
+
+		err = destHub.PutManifest(repository, tag, manifest)
+		if err != nil {
+			return -1, fmt.Errorf("Failed to upload manifest to %s/%s:%s. %v", destHub.URL, repository, tag, err)
+		}
+	*/
+	fmt.Printf("Copied Docker Image %s:%s successfully.", repository, tag)
+	return 0, nil
+}
+
+/*
+RepositoryArguments
+*/
 type RepositoryArguments struct {
 	RegistryURL *string
 	Repository  *string
@@ -115,10 +144,13 @@ func connectToRegistry(args RepositoryArguments, auths map[string]docker.AuthCon
 
 	url := *args.RegistryURL
 
+	urlWithoutPrefix := strings.TrimPrefix(url, "https://")
+	urlWithoutPrefix = strings.TrimPrefix(urlWithoutPrefix, "http://")
+
 	username := ""
 	password := ""
 
-	if auth, ok := auths[url]; ok {
+	if auth, ok := auths[urlWithoutPrefix]; ok {
 		username = auth.Username
 		password = auth.Password
 	}
@@ -134,6 +166,35 @@ func connectToRegistry(args RepositoryArguments, auths map[string]docker.AuthCon
 	}
 
 	return registry, nil
+}
+
+func listRepositoriesAndTags(srcHub *registry.Registry, destHub *registry.Registry) (int, error) {
+
+	exitCode := 0
+
+	repositories, err := srcHub.Repositories()
+	if err != nil {
+		return -1, fmt.Errorf("Failed to list repositories for %s", srcHub.URL)
+	}
+
+	for _, repository := range repositories {
+		tags, err := srcHub.Tags(repository)
+		if err != nil {
+			return -1, fmt.Errorf("Failed to list tags for %s", repository)
+		}
+		for _, tag := range tags {
+			fmt.Printf("%s:%s\n", repository, tag)
+
+			_, err = copyImage(srcHub, destHub, repository, tag)
+			if err != nil {
+				exitCode = -1
+				fmt.Printf("An error occured: %s\n", err)
+			}
+		}
+	}
+
+	return exitCode, nil
+
 }
 
 func main() {
@@ -167,17 +228,21 @@ func main() {
 		destArgs.Tag = tagArg
 	}
 
-	if *srcArgs.Repository == "" {
-		fmt.Printf("A source repository name is required either with --srcRepo or --repo\n")
-		exitCode = -1
-		return
-	}
+	/*
 
-	if *destArgs.Repository == "" {
-		fmt.Printf("A destiation repository name is required either with --destRepo or --repo\n")
-		exitCode = -1
-		return
-	}
+		if *srcArgs.Repository == "" {
+			fmt.Printf("A source repository name is required either with --srcRepo or --repo\n")
+			exitCode = -1
+			return
+		}
+
+		if *destArgs.Repository == "" {
+			fmt.Printf("A destiation repository name is required either with --destRepo or --repo\n")
+			exitCode = -1
+			return
+		}
+
+	*/
 
 	srcHub, err := connectToRegistry(srcArgs, auths.Configs)
 	if err != nil {
@@ -193,26 +258,9 @@ func main() {
 		return
 	}
 
-	manifest, err := srcHub.Manifest(*srcArgs.Repository, *srcArgs.Tag)
+	exitCode, err = listRepositoriesAndTags(srcHub, destHub)
 	if err != nil {
-		fmt.Printf("Failed to fetch the manifest for %s/%s:%s. %v", srcHub.URL, *srcArgs.Repository, *srcArgs.Tag, err)
-		exitCode = -1
-		return
-	}
-
-	for _, layer := range manifest.FSLayers {
-		err := migrateLayer(srcHub, destHub, *srcArgs.Repository, *destArgs.Repository, layer)
-		if err != nil {
-			fmt.Printf("Failed to migrate image layer. %v", err)
-			exitCode = -1
-			return
-		}
-	}
-
-	err = destHub.PutManifest(*destArgs.Repository, *destArgs.Tag, manifest)
-	if err != nil {
-		fmt.Printf("Failed to upload manifest to %s/%s:%s. %v", destHub.URL, *destArgs.Repository, *destArgs.Tag, err)
-		exitCode = -1
+		fmt.Println(err)
 	}
 
 }
