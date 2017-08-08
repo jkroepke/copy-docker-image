@@ -2,37 +2,24 @@ language: go
 sudo: required
 services:
 - docker
-go:
-- 1.8.1
-before_install:
-- go get -u github.com/kardianos/govendor
-- go get github.com/mitchellh/gox
-- export GO_VERSION=$(go version | cut -d' ' -f3 | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+')
-install:
-- govendor sync
-script:
-- go build main.go
+
+addons:
+  ssh_known_hosts: 46.38.251.201
+
+env:
+- DOCKER_IMAGE_NAME="r.3r1.co/3r1co/copy-docker-image:$TRAVIS_BUILD_NUMBER"
+
 after_success:
-# Build most binaries with GOX
-- gox -os "linux windows darwin" -arch "amd64 386" -output "dist/{{.Dir}}_{{.OS}}_{{.Arch}}"
-# Rename the Linux binary so that it's clearly based on gnu/glibc
-- mv dist/copy-docker-image_linux_amd64 dist/copy-docker-image_linux_amd64_gnu
-# Build a Musl based binary for Apline Linux based users
-- docker run --rm -v $GOPATH:/go -w /go/src/github.com/mdlavin/copy-docker-image quay.io/mdlavin/go-alpine-musl:$GO_VERSION
-- mv copy-docker-image dist/copy-docker-image_linux_amd64_musl
+- docker login -u="$DOCKER_USERNAME" -p="$DOCKER_PASSWORD" r.3r1.co
+- docker build -t $DOCKER_IMAGE_NAME .
+- docker push $DOCKER_IMAGE_NAME
+
+before_deploy:
+- openssl aes-256-cbc -K $encrypted_d3751784d1e2_key -iv $encrypted_d3751784d1e2_iv -in deploy_rsa.enc -out /tmp/deploy_rsa -d
+- eval "$(ssh-agent -s)"
+- chmod 600 /tmp/deploy_rsa
+- ssh-add /tmp/deploy_rsa
+
 deploy:
-  provider: releases
-  api_key:
-    secure: KsGWr0SutbYTNTaTO9nnYZUpO6Pki+oh1MsOGIquhJUBvDtT0VxHvRTIttA3Ziv/xJf6BKiSLBI885gC4/zavohqgk0WqtAQyiNtfmv/5o2fenRbgqjz75ak+pvOw2CyCKeRuo7R32FK1S0HKk4dTQua79toZjRyZcY3gTX2vzEHrEdRQSp8WQyHCfHE60de+sDGQZxQ0bcnfrMy4cSfSJ7hlpTywwJpBhURib1nY1q6RSotOrJBhmhTpBTEgn1AiIF51cYdtxmJJA4MrO6JEpyiciQvLrUquS/3w8k0+NmMYik0G12ECM3p6e/l9Qzb0tkMjPYvDWBMTHw4r/lObiJFV9V/Mc6iaP0PKyjKHEdx49ywMN0xspfEhm1H6R6YsxSEBGrdBvU7vhCDQh7TBZZJ7SqcW1jkNfpRY7wgTg4WCUzMJB8TD6rWEl+/LLb70uVjOKJaz0kXkDYc+RRG8+C2r3NPabfQ/pDBZoZvP87E2vyQ9M5Fo7vm8CIXDUF6VBHX8t4drCY5pTEN7UE3gH15An1S5njN+Kd4VMqeHfySO0ARceSZXiQcsgyZ3k/cVfX3rqDxXcAJYyli7IMX9QuPaGbtkDFejZqIWlrLs2EsQui/4r3RhQNVpUHtQjMlxQfa46TI9oScAnoMfDjY4S82nuIm328lKmAcRRNNQVw=
-  file:
-  - dist/copy-docker-image_darwin_amd64
-  - dist/copy-docker-image_darwin_386
-  - dist/copy-docker-image_linux_amd64_gnu
-  - dist/copy-docker-image_linux_amd64_musl
-  - dist/copy-docker-image_linux_386
-  - dist/copy-docker-image_windows_amd64.exe
-  - dist/copy-docker-image_windows_386.exe
-  on:
-    repo: mdlavin/copy-docker-image
-    tags: true
-  skip_cleanup: true
+- provider: script
+  script: ssh deployer@$DEPLOYMENT_TARGET 'docker pull $DOCKER_IMAGE_NAME && docker service update --image $DOCKER_IMAGE_NAME passwordservice'
