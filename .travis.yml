@@ -8,7 +8,5 @@ env:
 script:
 - docker login -u="$DOCKER_USERNAME" -p="$DOCKER_PASSWORD" r.3r1.co
 - docker build -t $DOCKER_IMAGE_NAME .
-
-after_success:
 - docker push $DOCKER_IMAGE_NAME
 
