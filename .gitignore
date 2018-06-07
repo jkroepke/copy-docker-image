@@ -1,3 +1,4 @@
 vendor/*
 dist/*
 !vendor/vendor.json
+_vendor*

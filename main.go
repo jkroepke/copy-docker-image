@@ -19,11 +19,8 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"strings"
-
 	"github.com/alecthomas/kingpin"
 	"github.com/docker/distribution/manifest/schema1"
-	"github.com/fsouza/go-dockerclient"
 	"github.com/heroku/docker-registry-client/registry"
 )
 
@@ -90,6 +87,8 @@ type RepositoryArguments struct {
 	RegistryURL *string
 	Repository  *string
 	Tag         *string
+	User        *string
+	Password    *string
 }
 
 func buildRegistryArguments(argPrefix string, argDescription string) RepositoryArguments {
@@ -105,25 +104,35 @@ func buildRegistryArguments(argPrefix string, argDescription string) RepositoryA
 	tagDescription := fmt.Sprintf("Name of the %s tag", argDescription)
 	tagArg := kingpin.Flag(tagName, tagDescription).String()
 
-	return RepositoryArguments{
+	userName:= fmt.Sprintf("%sUser", argPrefix)
+	userDescription := fmt.Sprintf("Name of the %s user", argDescription)
+	userArg := kingpin.Flag(userName, userDescription).String()
+
+	passwordName:= fmt.Sprintf("%sPassword", argPrefix)
+	passwordDescription := fmt.Sprintf("Password for %s", argDescription)
+	passwordArg := kingpin.Flag(passwordName, passwordDescription).String()
+
+	return RepositoryArguments {
 		RegistryURL: registryURLArg,
 		Repository:  repositoryArg,
 		Tag:         tagArg,
+		User:        userArg,
+		Password:    passwordArg,
 	}
 }
 
-func connectToRegistry(args RepositoryArguments, auths map[string]docker.AuthConfiguration) (*registry.Registry, error) {
+func connectToRegistry(args RepositoryArguments) (*registry.Registry, error) {
 
 	url := *args.RegistryURL
-	urlWithoutPrefix := strings.TrimPrefix(url, "https://")
-	urlWithoutPrefix = strings.TrimPrefix(url, "http://")
 
 	username := ""
 	password := ""
 
-	if auth, ok := auths[urlWithoutPrefix]; ok {
-		username = auth.Username
-		password = auth.Password
+	if args.User != nil {
+		username = *args.User
+	}
+	if args.Password != nil {
+		password = *args.Password
 	}
 
 	registry, err := registry.NewInsecure(url, username, password)
@@ -144,11 +153,6 @@ func main() {
 	defer func() {
 		os.Exit(exitCode)
 	}()
-
-	auths, err := docker.NewAuthConfigurationsFromDockerCfg()
-	if err != nil {
-		fmt.Printf("Couldn't read config.json in .docker folder\n")
-	}
 
 	srcArgs := buildRegistryArguments("src", "source")
 	destArgs := buildRegistryArguments("dest", "destiation")
@@ -182,14 +186,14 @@ func main() {
 		return
 	}
 
-	srcHub, err := connectToRegistry(srcArgs, auths.Configs)
+	srcHub, err := connectToRegistry(srcArgs)
 	if err != nil {
 		fmt.Printf("Failed to establish a connection to the source registry. %v", err)
 		exitCode = -1
 		return
 	}
 
-	destHub, err := connectToRegistry(destArgs, auths.Configs)
+	destHub, err := connectToRegistry(destArgs)
 	if err != nil {
 		fmt.Printf("Failed to establish a connection to the destination registry. %v", err)
 		exitCode = -1
