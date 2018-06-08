@@ -19,8 +19,10 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+
 	"github.com/alecthomas/kingpin"
 	"github.com/docker/distribution/manifest/schema1"
+	"github.com/docker/libtrust"
 	"github.com/heroku/docker-registry-client/registry"
 )
 
@@ -53,7 +55,7 @@ func moveLayerUsingFile(srcHub *registry.Registry, destHub *registry.Registry, s
 }
 
 func migrateLayer(srcHub *registry.Registry, destHub *registry.Registry, srcRepo string, destRepo string, layer schema1.FSLayer) error {
-	fmt.Println("Checking if manifest layer exists in destiation registery")
+	fmt.Println("Checking if manifest layer exists in destination registery")
 
 	layerDigest := layer.BlobSum
 	hasLayer, err := destHub.HasLayer(destRepo, layerDigest)
@@ -62,7 +64,7 @@ func migrateLayer(srcHub *registry.Registry, destHub *registry.Registry, srcRepo
 	}
 
 	if !hasLayer {
-		fmt.Println("Need to upload layer", layerDigest, "to the destiation")
+		fmt.Println("Need to upload layer", layerDigest, "to the destination")
 		tempFile, err := ioutil.TempFile("", "docker-image")
 		if err != nil {
 			return fmt.Errorf("Failure while a creating temporary file for an image layer download. %v", err)
@@ -104,15 +106,15 @@ func buildRegistryArguments(argPrefix string, argDescription string) RepositoryA
 	tagDescription := fmt.Sprintf("Name of the %s tag", argDescription)
 	tagArg := kingpin.Flag(tagName, tagDescription).String()
 
-	userName:= fmt.Sprintf("%sUser", argPrefix)
+	userName := fmt.Sprintf("%sUser", argPrefix)
 	userDescription := fmt.Sprintf("Name of the %s user", argDescription)
 	userArg := kingpin.Flag(userName, userDescription).String()
 
-	passwordName:= fmt.Sprintf("%sPassword", argPrefix)
+	passwordName := fmt.Sprintf("%sPassword", argPrefix)
 	passwordDescription := fmt.Sprintf("Password for %s", argDescription)
 	passwordArg := kingpin.Flag(passwordName, passwordDescription).String()
 
-	return RepositoryArguments {
+	return RepositoryArguments{
 		RegistryURL: registryURLArg,
 		Repository:  repositoryArg,
 		Tag:         tagArg,
@@ -216,7 +218,25 @@ func main() {
 		}
 	}
 
-	err = destHub.PutManifest(*destArgs.Repository, *destArgs.Tag, manifest)
+	newManifest := *manifest
+	newManifest.Tag = *destArgs.Tag
+	newManifest.Name = *destArgs.Repository
+
+	key, err := libtrust.GenerateECP256PrivateKey()
+	if err != nil {
+		fmt.Printf("Failed to generate keys %s\n", err)
+		exitCode = -1
+		return
+	}
+
+	signedManifest, err := schema1.Sign(&newManifest.Manifest, key)
+	if err != nil {
+		fmt.Printf("Failed to sign manifest %s\n", err)
+		exitCode = -1
+		return
+	}
+
+	err = destHub.PutManifest(*destArgs.Repository, *destArgs.Tag, signedManifest)
 	if err != nil {
 		fmt.Printf("Failed to upload manifest to %s/%s:%s. %v", destHub.URL, *destArgs.Repository, *destArgs.Tag, err)
 		exitCode = -1
