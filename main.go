@@ -28,32 +28,6 @@ import (
 	"github.com/docker/distribution/manifest/schema2"
 )
 
-func moveLayerUsingFile(srcHub *registry.Registry, destHub *registry.Registry, srcRepo string, destRepo string, layer distribution.Descriptor) error {
-
-	layerDigest := layer.Digest
-
-	read, write := io.Pipe()
-
-	go func() error {
-		defer write.Close()
-
-		srcImageReader, err := srcHub.DownloadLayer(srcRepo, layerDigest)
-		if err != nil {
-			return fmt.Errorf("Failure while starting the download of an image layer. %v", err)
-		}
-
-		io.Copy(write, srcImageReader)
-
-		return nil
-	}()
-
-	err := destHub.UploadLayer(destRepo, layerDigest, read)
-	if err != nil {
-		return fmt.Errorf("Failure while uploading the image. %v", err)
-	}
-
-	return nil
-}
 
 func migrateLayer(srcHub *registry.Registry, destHub *registry.Registry, srcRepo string, destRepo string, layer distribution.Descriptor) error {
 
@@ -67,8 +41,26 @@ func migrateLayer(srcHub *registry.Registry, destHub *registry.Registry, srcRepo
 
 	if !hasLayer {
 		fmt.Println("Need to upload layer", layerDigest, "to the destination")
-		err = moveLayerUsingFile(srcHub, destHub, srcRepo, destRepo, layer)
-		return err
+		read, write := io.Pipe()
+
+		go func() error {
+			defer srcImageReader.Close()
+			defer write.Close()
+
+			srcImageReader, err := srcHub.DownloadLayer(srcRepo, layerDigest)
+			if err != nil {
+				return fmt.Errorf("Failure while starting the download of an image layer. %v", err)
+			}
+
+			io.Copy(write, srcImageReader)
+
+			return nil
+		}()
+
+		err := destHub.UploadLayer(destRepo, layerDigest, read)
+		if err != nil {
+			return fmt.Errorf("Failure while uploading the image. %v", err)
+		}
 	}
 
 	srcHub.Logf("Layer already exists in the destination")
@@ -98,21 +90,47 @@ func copyImage(srcHub *registry.Registry, destHub *registry.Registry, srcArgs Re
 		return -1, fmt.Errorf("Failed to migrate image layer. %v", err)
 	}
 
+	quit := make(chan bool)
+	errc := make(chan error)
+	done := make(chan error)
+
 	for _, layer := range manifest.Layers {
-		srcHub.Logf("Uploading Layer: %s", layer.Digest)
-		err := migrateLayer(srcHub, destHub, *srcArgs.Repository, *destArgs.Repository, layer)
-		if err != nil {
+		go func(layer distribution.Descriptor) {
+			srcHub.Logf("Uploading Layer: %s", layer.Digest)
+			err := migrateLayer(srcHub, destHub, *srcArgs.Repository, *destArgs.Repository, layer)
+
+			ch := done // we'll send to done if nil error and to errc otherwise
+			if err != nil {
+				ch = errc
+			}
+			select {
+			case ch <- err:
+				return
+			case <-quit:
+				return
+			}
+		}(layer)
+	}
+	count := 0
+	for {
+		select {
+		case err := <-errc:
+			close(quit)
+
 			return -1, fmt.Errorf("Failed to migrate image layer. %v", err)
+		case <-done:
+			count++
+			if count == len(manifest.Layers) {
+				err = destHub.PutManifest(*destArgs.Repository, *destArgs.Tag, deserializedManifest)
+				if err != nil {
+					return -1, fmt.Errorf("Failed to upload manifest to %s/%s:%s. %v", destHub.URL, *destArgs.Repository, *destArgs.Tag, err)
+				}
+
+				fmt.Printf("Copied Docker Image %s:%s successfully.\n", *srcArgs.Repository, *srcArgs.Tag)
+				return 0, nil
+			}
 		}
 	}
-
-	err = destHub.PutManifest(*destArgs.Repository, *destArgs.Tag, deserializedManifest)
-	if err != nil {
-		return -1, fmt.Errorf("Failed to upload manifest to %s/%s:%s. %v", destHub.URL, *destArgs.Repository, *destArgs.Tag, err)
-	}
-
-	fmt.Printf("Copied Docker Image %s:%s successfully.\n", *srcArgs.Repository, *srcArgs.Tag)
-	return 0, nil
 }
 
 type RepositoryArguments struct {
