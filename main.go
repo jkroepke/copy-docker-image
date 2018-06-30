@@ -16,14 +16,15 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
+	"time"
 
 	"github.com/alecthomas/kingpin"
 	"github.com/docker/distribution/manifest/schema1"
 	"github.com/docker/libtrust"
-	"github.com/heroku/docker-registry-client/registry"
+	"github.com/jkroepke/reg/registry"
+	"github.com/genuinetools/reg/repoutils"
 )
 
 func moveLayerUsingFile(srcHub *registry.Registry, destHub *registry.Registry, srcRepo string, destRepo string, layer schema1.FSLayer, file *os.File) error {
@@ -34,19 +35,7 @@ func moveLayerUsingFile(srcHub *registry.Registry, destHub *registry.Registry, s
 		return fmt.Errorf("Failure while starting the download of an image layer. %v", err)
 	}
 
-	_, err = io.Copy(file, srcImageReader)
-	if err != nil {
-		return fmt.Errorf("Failure while copying the image layer to a temp file. %v", err)
-	}
-	srcImageReader.Close()
-	file.Sync()
-
-	imageReadStream, err := os.Open(file.Name())
-	if err != nil {
-		return fmt.Errorf("Failed to open the temporary image layer for uploading. %v", err)
-	}
-	err = destHub.UploadLayer(destRepo, layerDigest, imageReadStream)
-	imageReadStream.Close()
+	err = destHub.UploadLayer(destRepo, layerDigest, srcImageReader)
 	if err != nil {
 		return fmt.Errorf("Failure while uploading the image. %v", err)
 	}
@@ -86,44 +75,68 @@ func migrateLayer(srcHub *registry.Registry, destHub *registry.Registry, srcRepo
 }
 
 type RepositoryArguments struct {
-	RegistryURL *string
-	Repository  *string
-	Tag         *string
-	User        *string
-	Password    *string
+	RegistryURL  *string
+	Repository   *string
+	Tag          *string
+	User         *string
+	Password     *string
+	Timeout      *string
+	Insecure     *bool
+	ForceNoneSsl *bool
+	SkipPing     *bool
 }
 
 func buildRegistryArguments(argPrefix string, argDescription string) RepositoryArguments {
-	registryURLName := fmt.Sprintf("%sURL", argPrefix)
+	registryURLName := fmt.Sprintf("%s-url", argPrefix)
 	registryURLDescription := fmt.Sprintf("URL of %s registry", argDescription)
 	registryURLArg := kingpin.Flag(registryURLName, registryURLDescription).String()
 
-	repositoryName := fmt.Sprintf("%sRepo", argPrefix)
+	repositoryName := fmt.Sprintf("%s-repo", argPrefix)
 	repositoryDescription := fmt.Sprintf("Name of the %s repository", argDescription)
 	repositoryArg := kingpin.Flag(repositoryName, repositoryDescription).String()
 
-	tagName := fmt.Sprintf("%sTag", argPrefix)
+	tagName := fmt.Sprintf("%s-tag", argPrefix)
 	tagDescription := fmt.Sprintf("Name of the %s tag", argDescription)
 	tagArg := kingpin.Flag(tagName, tagDescription).String()
 
-	userName := fmt.Sprintf("%sUser", argPrefix)
+	userName := fmt.Sprintf("%s-user", argPrefix)
 	userDescription := fmt.Sprintf("Name of the %s user", argDescription)
 	userArg := kingpin.Flag(userName, userDescription).String()
 
-	passwordName := fmt.Sprintf("%sPassword", argPrefix)
+	passwordName := fmt.Sprintf("%s-password", argPrefix)
 	passwordDescription := fmt.Sprintf("Password for %s", argDescription)
 	passwordArg := kingpin.Flag(passwordName, passwordDescription).String()
 
+	timeoutName := fmt.Sprintf("%s-timeout", argPrefix)
+	timeoutDescription := fmt.Sprintf("Timeout for %s", argDescription)
+	timeoutArg := kingpin.Flag(timeoutName, timeoutDescription).Default("1m").String()
+
+	insecureName := fmt.Sprintf("%s-insecure", argPrefix)
+	insecureDescription := fmt.Sprintf("Do not verify tls certificates for %s", argDescription)
+	insecureArg := kingpin.Flag(insecureName, insecureDescription).Bool()
+
+	forceNonSslName := fmt.Sprintf("%s-force-non-ssl", argPrefix)
+	forceNonSslDescription := fmt.Sprintf("force allow use of non-ssl for %s", argDescription)
+	forceNonSslArg := kingpin.Flag(forceNonSslName, forceNonSslDescription).Bool()
+
+	skipPingName := fmt.Sprintf("%s-skip-ping", argPrefix)
+	skipPingDescription := fmt.Sprintf("skip pinging the registry while establishing connection for %s", argDescription)
+	skipPingArg := kingpin.Flag(skipPingName, skipPingDescription).Bool()
+
 	return RepositoryArguments{
-		RegistryURL: registryURLArg,
-		Repository:  repositoryArg,
-		Tag:         tagArg,
-		User:        userArg,
-		Password:    passwordArg,
+		RegistryURL: 	registryURLArg,
+		Repository:  	repositoryArg,
+		Tag:         	tagArg,
+		User:        	userArg,
+		Password:    	passwordArg,
+		Insecure:    	insecureArg,
+		ForceNoneSsl:   forceNonSslArg,
+		SkipPing:    	skipPingArg,
+		Timeout:    	timeoutArg,
 	}
 }
 
-func connectToRegistry(args RepositoryArguments) (*registry.Registry, error) {
+func connectToRegistry(args RepositoryArguments, debugArg *bool) (*registry.Registry, error) {
 
 	url := *args.RegistryURL
 
@@ -137,14 +150,23 @@ func connectToRegistry(args RepositoryArguments) (*registry.Registry, error) {
 		password = *args.Password
 	}
 
-	registry, err := registry.NewInsecure(url, username, password)
+
+	timeout, err := time.ParseDuration(*args.Timeout)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create registry connection for %s. %v", url, err)
+		return nil, fmt.Errorf("parsing %s as duration failed: %v", timeout, err)
 	}
 
-	err = registry.Ping()
+	auth, err := repoutils.GetAuthConfig(username, password, *args.RegistryURL)
+
+	registry, err := registry.New(auth, registry.Opt{
+		Insecure: *args.Insecure,
+		Debug:    *debugArg,
+		SkipPing: *args.SkipPing,
+		Timeout:  timeout,
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("Failed to to ping registry %s as a connection test. %v", url, err)
+		return nil, fmt.Errorf("Failed to create registry connection for %s. %v", url, err)
 	}
 
 	return registry, nil
@@ -160,6 +182,7 @@ func main() {
 	destArgs := buildRegistryArguments("dest", "destiation")
 	repoArg := kingpin.Flag("repo", "The repository in the source and the destiation. Values provided by --srcRepo or --destTag will override this value").String()
 	tagArg := kingpin.Flag("tag", "The tag name in the source and the destiation. Values provided by --srcTag or --destTag will override this value").Default("latest").String()
+	debugArg := kingpin.Flag("debug", "Enable debug mode.").Bool()
 	kingpin.Parse()
 
 	if *srcArgs.Repository == "" {
@@ -188,21 +211,21 @@ func main() {
 		return
 	}
 
-	srcHub, err := connectToRegistry(srcArgs)
+	srcHub, err := connectToRegistry(srcArgs, debugArg)
 	if err != nil {
 		fmt.Printf("Failed to establish a connection to the source registry. %v", err)
 		exitCode = -1
 		return
 	}
 
-	destHub, err := connectToRegistry(destArgs)
+	destHub, err := connectToRegistry(destArgs, debugArg)
 	if err != nil {
 		fmt.Printf("Failed to establish a connection to the destination registry. %v", err)
 		exitCode = -1
 		return
 	}
 
-	manifest, err := srcHub.Manifest(*srcArgs.Repository, *srcArgs.Tag)
+	manifest, err := srcHub.ManifestV1(*srcArgs.Repository, *srcArgs.Tag)
 	if err != nil {
 		fmt.Printf("Failed to fetch the manifest for %s/%s:%s. %v", srcHub.URL, *srcArgs.Repository, *srcArgs.Tag, err)
 		exitCode = -1
@@ -218,7 +241,7 @@ func main() {
 		}
 	}
 
-	newManifest := *manifest
+	newManifest := &manifest
 	newManifest.Tag = *destArgs.Tag
 	newManifest.Name = *destArgs.Repository
 

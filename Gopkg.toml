@@ -30,8 +30,26 @@
   version = "2.2.3"
 
 [[constraint]]
-  name = "github.com/docker/distribution"
-  version = "2.6.1"
+  name = "github.com/jkroepke/reg"
+  branch = "auth_upload"
+
+# https://github.com/genuinetools/reg/blob/master/Gopkg.toml
+
+[[override]]
+  name = "github.com/docker/cli"
+  branch = "master"
+
+[[override]]
+  name = "github.com/docker/docker-credentials-helpers"
+  branch = "master"
+
+[[override]]
+  name = "github.com/docker/go-connections"
+  branch = "master"
+
+[[override]]
+  name = "github.com/prometheus/client_golang"
+  branch = "master"
 
 [prune]
   go-tests = true

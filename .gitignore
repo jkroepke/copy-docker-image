@@ -1,5 +1,8 @@
+/copy-docker-image
 vendor/*
 dist/*
 !vendor/vendor.json
 _vendor*
 .envrc
+*.iml
+.idea/
