@@ -16,19 +16,20 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"time"
 
 	"github.com/alecthomas/kingpin"
-	"github.com/docker/distribution/manifest/schema1"
-	"github.com/docker/libtrust"
 	"github.com/jkroepke/reg/registry"
 	"github.com/genuinetools/reg/repoutils"
+
+	"github.com/docker/distribution"
+	"github.com/docker/distribution/manifest/schema2"
 )
 
-func moveLayerUsingFile(srcHub *registry.Registry, destHub *registry.Registry, srcRepo string, destRepo string, layer schema1.FSLayer, file *os.File) error {
-	layerDigest := layer.BlobSum
+func moveLayerUsingFile(srcHub *registry.Registry, destHub *registry.Registry, srcRepo string, destRepo string, layer distribution.Descriptor) error {
+
+	layerDigest := layer.Digest
 
 	srcImageReader, err := srcHub.DownloadLayer(srcRepo, layerDigest)
 	if err != nil {
@@ -43,35 +44,65 @@ func moveLayerUsingFile(srcHub *registry.Registry, destHub *registry.Registry, s
 	return nil
 }
 
-func migrateLayer(srcHub *registry.Registry, destHub *registry.Registry, srcRepo string, destRepo string, layer schema1.FSLayer) error {
-	fmt.Println("Checking if manifest layer exists in destination registery")
 
-	layerDigest := layer.BlobSum
+func migrateLayer(srcHub *registry.Registry, destHub *registry.Registry, srcRepo string, destRepo string, layer distribution.Descriptor) error {
+
+	srcHub.Logf("Checking if manifest layer exists in destination registry")
+
+	layerDigest := layer.Digest
 	hasLayer, err := destHub.HasLayer(destRepo, layerDigest)
 	if err != nil {
-		return fmt.Errorf("Failure while checking if the destiation registry contained an image layer. %v", err)
+		return fmt.Errorf("Failure while checking if the destination registry contained an image layer. %v", err)
 	}
 
 	if !hasLayer {
 		fmt.Println("Need to upload layer", layerDigest, "to the destination")
-		tempFile, err := ioutil.TempFile("", "docker-image")
-		if err != nil {
-			return fmt.Errorf("Failure while a creating temporary file for an image layer download. %v", err)
-		}
-
-		err = moveLayerUsingFile(srcHub, destHub, srcRepo, destRepo, layer, tempFile)
-		removeErr := os.Remove(tempFile.Name())
-		if removeErr != nil {
-			// Print the error but don't fail the whole migration just because of a leaked temp file
-			fmt.Printf("Failed to remove image layer temp file %s. %v", tempFile.Name(), removeErr)
-		}
-
+		err = moveLayerUsingFile(srcHub, destHub, srcRepo, destRepo, layer)
 		return err
 	}
 
-	fmt.Println("Layer already exists in the destination")
+	srcHub.Logf("Layer already exists in the destination")
 	return nil
 
+}
+
+func copyImage(srcHub *registry.Registry, destHub *registry.Registry, srcArgs RepositoryArguments, destArgs RepositoryArguments) (int, error) {
+
+	manifest, err := srcHub.ManifestV2(*srcArgs.Repository, *srcArgs.Tag)
+	if err != nil {
+		return -1, fmt.Errorf("Failed to fetch the manifest for %s/%s:%s. %v", srcHub.URL, *srcArgs.Repository, *srcArgs.Tag, err)
+	}
+
+	deserializedManifest, err := schema2.FromStruct(manifest)
+	if err != nil {
+		return -1, fmt.Errorf("Failed to deserialized the manifest for %s/%s:%s. %v", srcHub.URL, *srcArgs.Repository, *srcArgs.Tag, err)
+	}
+
+	resp, err := deserializedManifest.MarshalJSON()
+
+	srcHub.Logf(string(resp))
+
+	//Migrate config object first
+	err = migrateLayer(srcHub, destHub, *srcArgs.Repository, *destArgs.Repository, manifest.Config)
+	if err != nil {
+		return -1, fmt.Errorf("Failed to migrate image layer. %v", err)
+	}
+
+	for _, layer := range manifest.Layers {
+		srcHub.Logf("Uploading Layer: %s", layer.Digest)
+		err := migrateLayer(srcHub, destHub, *srcArgs.Repository, *destArgs.Repository, layer)
+		if err != nil {
+			return -1, fmt.Errorf("Failed to migrate image layer. %v", err)
+		}
+	}
+
+	err = destHub.PutManifest(*destArgs.Repository, *destArgs.Tag, deserializedManifest)
+	if err != nil {
+		return -1, fmt.Errorf("Failed to upload manifest to %s/%s:%s. %v", destHub.URL, *destArgs.Repository, *destArgs.Tag, err)
+	}
+
+	fmt.Printf("Copied Docker Image %s:%s successfully.\n", *srcArgs.Repository, *srcArgs.Tag)
+	return 0, nil
 }
 
 type RepositoryArguments struct {
@@ -213,56 +244,23 @@ func main() {
 
 	srcHub, err := connectToRegistry(srcArgs, debugArg)
 	if err != nil {
-		fmt.Printf("Failed to establish a connection to the source registry. %v", err)
+		fmt.Printf("Failed to establish a connection to the source registry. %v\n", err)
 		exitCode = -1
 		return
 	}
 
 	destHub, err := connectToRegistry(destArgs, debugArg)
 	if err != nil {
-		fmt.Printf("Failed to establish a connection to the destination registry. %v", err)
+		fmt.Printf("Failed to establish a connection to the destination registry. %v\n", err)
 		exitCode = -1
 		return
 	}
 
-	manifest, err := srcHub.ManifestV1(*srcArgs.Repository, *srcArgs.Tag)
+	_, err = copyImage(srcHub, destHub, srcArgs, destArgs)
 	if err != nil {
-		fmt.Printf("Failed to fetch the manifest for %s/%s:%s. %v", srcHub.URL, *srcArgs.Repository, *srcArgs.Tag, err)
+		fmt.Printf("An error occured: %s\n", err)
 		exitCode = -1
 		return
-	}
-
-	for _, layer := range manifest.FSLayers {
-		err := migrateLayer(srcHub, destHub, *srcArgs.Repository, *destArgs.Repository, layer)
-		if err != nil {
-			fmt.Printf("Failed to migrate image layer. %v", err)
-			exitCode = -1
-			return
-		}
-	}
-
-	newManifest := &manifest
-	newManifest.Tag = *destArgs.Tag
-	newManifest.Name = *destArgs.Repository
-
-	key, err := libtrust.GenerateECP256PrivateKey()
-	if err != nil {
-		fmt.Printf("Failed to generate keys %s\n", err)
-		exitCode = -1
-		return
-	}
-
-	signedManifest, err := schema1.Sign(&newManifest.Manifest, key)
-	if err != nil {
-		fmt.Printf("Failed to sign manifest %s\n", err)
-		exitCode = -1
-		return
-	}
-
-	err = destHub.PutManifest(*destArgs.Repository, *destArgs.Tag, signedManifest)
-	if err != nil {
-		fmt.Printf("Failed to upload manifest to %s/%s:%s. %v", destHub.URL, *destArgs.Repository, *destArgs.Tag, err)
-		exitCode = -1
 	}
 
 }
