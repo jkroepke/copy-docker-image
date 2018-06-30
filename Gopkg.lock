@@ -124,7 +124,7 @@
   branch = "master"
   name = "github.com/docker/docker-ce"
   packages = ["components/cli/cli/config"]
-  revision = "2e0dedd096c7d6c0d57e1598c5f597634f8a78b9"
+  revision = "a72ff1622367e486960dafd485bf45b7a0339af5"
 
 [[projects]]
   name = "github.com/docker/docker-credential-helpers"
@@ -308,6 +308,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "1c75a84e42019734552067ffb09f7a6ecb666bb901faf7ea48ef2e2eff7b2902"
+  inputs-digest = "1f5c7482edf3a759e9bbcb61ee3cf400f5a2f729e9ab8c2ef70e8517b398cc68"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -16,13 +16,13 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"time"
-	"io"
 
 	"github.com/alecthomas/kingpin"
-	"github.com/jkroepke/reg/registry"
 	"github.com/genuinetools/reg/repoutils"
+	"github.com/jkroepke/reg/registry"
 
 	"github.com/docker/distribution"
 	"github.com/docker/distribution/manifest/schema2"
@@ -54,7 +54,6 @@ func moveLayerUsingFile(srcHub *registry.Registry, destHub *registry.Registry, s
 
 	return nil
 }
-
 
 func migrateLayer(srcHub *registry.Registry, destHub *registry.Registry, srcRepo string, destRepo string, layer distribution.Descriptor) error {
 
@@ -166,15 +165,15 @@ func buildRegistryArguments(argPrefix string, argDescription string) RepositoryA
 	skipPingArg := kingpin.Flag(skipPingName, skipPingDescription).Bool()
 
 	return RepositoryArguments{
-		RegistryURL: 	registryURLArg,
-		Repository:  	repositoryArg,
-		Tag:         	tagArg,
-		User:        	userArg,
-		Password:    	passwordArg,
-		Insecure:    	insecureArg,
-		ForceNoneSsl:   forceNonSslArg,
-		SkipPing:    	skipPingArg,
-		Timeout:    	timeoutArg,
+		RegistryURL:  registryURLArg,
+		Repository:   repositoryArg,
+		Tag:          tagArg,
+		User:         userArg,
+		Password:     passwordArg,
+		Insecure:     insecureArg,
+		ForceNoneSsl: forceNonSslArg,
+		SkipPing:     skipPingArg,
+		Timeout:      timeoutArg,
 	}
 }
 
@@ -191,7 +190,6 @@ func connectToRegistry(args RepositoryArguments, debugArg *bool) (*registry.Regi
 	if args.Password != nil {
 		password = *args.Password
 	}
-
 
 	timeout, err := time.ParseDuration(*args.Timeout)
 	if err != nil {
