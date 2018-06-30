@@ -1,31 +1,27 @@
 language: go
-sudo: required
-services:
-- docker
 go:
-- 1.10.1
+  - 1.10.1
 before_install:
-- go get -u github.com/golang/dep/cmd/dep
-- go get github.com/mitchellh/gox
-- export GO_VERSION=$(go version | cut -d' ' -f3 | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+')
+  - go get -u github.com/golang/dep/cmd/dep
+  - go get github.com/mitchellh/gox
 install:
-- dep ensure
+  - dep ensure
 script:
-- go build main.go
+  - go build main.go
 after_success:
-# Build most binaries with GOX
-- CGO_ENABLED=0 gox -os "linux windows darwin" -arch "amd64 386" -output "dist/{{.Dir}}_{{.OS}}_{{.Arch}}"
+  # Build most binaries with GOX
+  - CGO_ENABLED=0 gox -os "linux windows darwin" -arch "amd64 386" -output "dist/{{.Dir}}_{{.OS}}_{{.Arch}}"
 deploy:
   provider: releases
   api_key:
     secure: "OoYYOFKuczw7cvXQF75as0ijJHQ2I59nfsUwfXQjD1Jm9m+zp91//xxCR8/EKP/soXviGBOg/qGV1BZGO4v6ElWR1mudWAigdlHHOTW1VcJpzrlWsFjsvGXaMZ7j1NV+LtyQHLiCwuBiOnRDwCdZ5AyvzLbzXugN4rFkT1khT7vGt7bcDo1X/dP97M5EwCapZqiqaRgMJuXBdCJZiJjLeXt+mGnPjRDARp+eYhTwQc9N0KYjcJIgz7I1bbAmE+ZaHMqF9RC7AAVTicsmNbZBvFS6QMRO0svCPdpPmExTOUyxg17hJyBpMn9ySb/SAfI9cwuADEsU/M04r2Y27Ty5daesEtuNdtTGx7Dw4e4Vr4gpZkrxqL8mKiBc84i84LsF3IsXiY441GN6zSK66jUJk6S6inEC5sCJjzBvjC2jtAerFBli9ddlE+Y1tpHNPuc32HdXy55XheparZkKa8e/uwK7w2y87Zc8k9mOIcl4RQEobzfZdGtxv6Un2T00dYdJgGUVKCnIphntmgBC6gjsop9AGt7wFh1u4G0vIcq7egWDcLBLXOkPbPRkm3wgJPrCD2/7UbYhO0knq/YmL/80nxiS/nVvfkuZYlbNSdLTybp0gGp+socacWoqnJXuhJl8lNPey/O0iugEUidzFWcV25sMMQdIaiNg2NFmwZsdOZc="
   file:
-  - dist/copy-docker-image_darwin_amd64
-  - dist/copy-docker-image_darwin_386
-  - dist/copy-docker-image_linux_amd64
-  - dist/copy-docker-image_linux_386
-  - dist/copy-docker-image_windows_amd64.exe
-  - dist/copy-docker-image_windows_386.exe
+    - dist/copy-docker-image_darwin_amd64
+    - dist/copy-docker-image_darwin_386
+    - dist/copy-docker-image_linux_amd64
+    - dist/copy-docker-image_linux_386
+    - dist/copy-docker-image_windows_amd64.exe
+    - dist/copy-docker-image_windows_386.exe
   on:
     repo: jkroepke/copy-docker-image
     tags: true
