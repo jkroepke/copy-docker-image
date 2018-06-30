@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"time"
+	"io"
 
 	"github.com/alecthomas/kingpin"
 	"github.com/jkroepke/reg/registry"
@@ -31,12 +32,22 @@ func moveLayerUsingFile(srcHub *registry.Registry, destHub *registry.Registry, s
 
 	layerDigest := layer.Digest
 
-	srcImageReader, err := srcHub.DownloadLayer(srcRepo, layerDigest)
-	if err != nil {
-		return fmt.Errorf("Failure while starting the download of an image layer. %v", err)
-	}
+	read, write := io.Pipe()
 
-	err = destHub.UploadLayer(destRepo, layerDigest, srcImageReader)
+	go func() error {
+		defer write.Close()
+
+		srcImageReader, err := srcHub.DownloadLayer(srcRepo, layerDigest)
+		if err != nil {
+			return fmt.Errorf("Failure while starting the download of an image layer. %v", err)
+		}
+
+		io.Copy(write, srcImageReader)
+
+		return nil
+	}()
+
+	err := destHub.UploadLayer(destRepo, layerDigest, read)
 	if err != nil {
 		return fmt.Errorf("Failure while uploading the image. %v", err)
 	}
