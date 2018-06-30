@@ -3,36 +3,30 @@ sudo: required
 services:
 - docker
 go:
-- 1.8.1
+- 1.10.1
 before_install:
-- go get -u github.com/kardianos/govendor
+- go get -u github.com/golang/dep/cmd/dep
 - go get github.com/mitchellh/gox
 - export GO_VERSION=$(go version | cut -d' ' -f3 | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+')
 install:
-- govendor sync
+- dep ensure
 script:
 - go build main.go
 after_success:
 # Build most binaries with GOX
-- gox -os "linux windows darwin" -arch "amd64 386" -output "dist/{{.Dir}}_{{.OS}}_{{.Arch}}"
-# Rename the Linux binary so that it's clearly based on gnu/glibc
-- mv dist/copy-docker-image_linux_amd64 dist/copy-docker-image_linux_amd64_gnu
-# Build a Musl based binary for Apline Linux based users
-- docker run --rm -v $GOPATH:/go -w /go/src/github.com/mdlavin/copy-docker-image quay.io/mdlavin/go-alpine-musl:$GO_VERSION
-- mv copy-docker-image dist/copy-docker-image_linux_amd64_musl
+- CGO_ENABLED=0 gox -os "linux windows darwin" -arch "amd64 386" -output "dist/{{.Dir}}_{{.OS}}_{{.Arch}}"
 deploy:
   provider: releases
   api_key:
-    secure: KsGWr0SutbYTNTaTO9nnYZUpO6Pki+oh1MsOGIquhJUBvDtT0VxHvRTIttA3Ziv/xJf6BKiSLBI885gC4/zavohqgk0WqtAQyiNtfmv/5o2fenRbgqjz75ak+pvOw2CyCKeRuo7R32FK1S0HKk4dTQua79toZjRyZcY3gTX2vzEHrEdRQSp8WQyHCfHE60de+sDGQZxQ0bcnfrMy4cSfSJ7hlpTywwJpBhURib1nY1q6RSotOrJBhmhTpBTEgn1AiIF51cYdtxmJJA4MrO6JEpyiciQvLrUquS/3w8k0+NmMYik0G12ECM3p6e/l9Qzb0tkMjPYvDWBMTHw4r/lObiJFV9V/Mc6iaP0PKyjKHEdx49ywMN0xspfEhm1H6R6YsxSEBGrdBvU7vhCDQh7TBZZJ7SqcW1jkNfpRY7wgTg4WCUzMJB8TD6rWEl+/LLb70uVjOKJaz0kXkDYc+RRG8+C2r3NPabfQ/pDBZoZvP87E2vyQ9M5Fo7vm8CIXDUF6VBHX8t4drCY5pTEN7UE3gH15An1S5njN+Kd4VMqeHfySO0ARceSZXiQcsgyZ3k/cVfX3rqDxXcAJYyli7IMX9QuPaGbtkDFejZqIWlrLs2EsQui/4r3RhQNVpUHtQjMlxQfa46TI9oScAnoMfDjY4S82nuIm328lKmAcRRNNQVw=
+    secure: "OoYYOFKuczw7cvXQF75as0ijJHQ2I59nfsUwfXQjD1Jm9m+zp91//xxCR8/EKP/soXviGBOg/qGV1BZGO4v6ElWR1mudWAigdlHHOTW1VcJpzrlWsFjsvGXaMZ7j1NV+LtyQHLiCwuBiOnRDwCdZ5AyvzLbzXugN4rFkT1khT7vGt7bcDo1X/dP97M5EwCapZqiqaRgMJuXBdCJZiJjLeXt+mGnPjRDARp+eYhTwQc9N0KYjcJIgz7I1bbAmE+ZaHMqF9RC7AAVTicsmNbZBvFS6QMRO0svCPdpPmExTOUyxg17hJyBpMn9ySb/SAfI9cwuADEsU/M04r2Y27Ty5daesEtuNdtTGx7Dw4e4Vr4gpZkrxqL8mKiBc84i84LsF3IsXiY441GN6zSK66jUJk6S6inEC5sCJjzBvjC2jtAerFBli9ddlE+Y1tpHNPuc32HdXy55XheparZkKa8e/uwK7w2y87Zc8k9mOIcl4RQEobzfZdGtxv6Un2T00dYdJgGUVKCnIphntmgBC6gjsop9AGt7wFh1u4G0vIcq7egWDcLBLXOkPbPRkm3wgJPrCD2/7UbYhO0knq/YmL/80nxiS/nVvfkuZYlbNSdLTybp0gGp+socacWoqnJXuhJl8lNPey/O0iugEUidzFWcV25sMMQdIaiNg2NFmwZsdOZc="
   file:
   - dist/copy-docker-image_darwin_amd64
   - dist/copy-docker-image_darwin_386
-  - dist/copy-docker-image_linux_amd64_gnu
-  - dist/copy-docker-image_linux_amd64_musl
+  - dist/copy-docker-image_linux_amd64
   - dist/copy-docker-image_linux_386
   - dist/copy-docker-image_windows_amd64.exe
   - dist/copy-docker-image_windows_386.exe
   on:
-    repo: mdlavin/copy-docker-image
+    repo: jkroepke/copy-docker-image
     tags: true
   skip_cleanup: true

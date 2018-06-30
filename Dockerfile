@@ -4,4 +4,5 @@ WORKDIR /go/src/copy-docker-image
 ADD . .
 # RUN dep ensure -h
 RUN go build
+RUN ls -lah
 RUN ./copy-docker-image --help
