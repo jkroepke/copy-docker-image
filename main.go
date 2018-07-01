@@ -168,7 +168,8 @@ func copyImage(srcHub *registry.Registry, destHub *registry.Registry, srcArgs Re
 		}
 	}
 
-	//Migrate config object first
+	logrus.Infof("Upload config layer %s to the destination", manifest.Config)
+
 	err = migrateLayer(srcHub, destHub, *srcArgs.Repository, *destArgs.Repository, manifest.Config)
 	if err != nil {
 		return fmt.Errorf("Failed to migrate config layer. %v", err)
@@ -176,7 +177,7 @@ func copyImage(srcHub *registry.Registry, destHub *registry.Registry, srcArgs Re
 
 	err = destHub.PutManifest(*destArgs.Repository, *destArgs.Tag, deserializedManifest)
 	if err != nil {
-		return fmt.Errorf("Failed to upload manifest to %s/%s:%s. %v", destHub.URL, *destArgs.Repository, *destArgs.Tag, err)
+		return fmt.Errorf("Failed to upload config manifest to %s/%s:%s. %v", destHub.URL, *destArgs.Repository, *destArgs.Tag, err)
 	}
 
 	logrus.Infof("Copied Docker Image %s:%s successfully.", *srcArgs.Repository, *srcArgs.Tag)
@@ -197,7 +198,7 @@ type RepositoryArguments struct {
 func buildRegistryArguments(argPrefix string, argDescription string) RepositoryArguments {
 	registryURLName := fmt.Sprintf("%s-url", argPrefix)
 	registryURLDescription := fmt.Sprintf("URL of %s registry", argDescription)
-	registryURLArg := kingpin.Flag(registryURLName, registryURLDescription).String()
+	registryURLArg := kingpin.Flag(registryURLName, registryURLDescription).Default("docker.io").String()
 
 	repositoryName := fmt.Sprintf("%s-repo", argPrefix)
 	repositoryDescription := fmt.Sprintf("Name of the %s repository", argDescription)
@@ -283,6 +284,7 @@ func main() {
 	repoArg := kingpin.Flag("repo", "The repository in the source and the destination. Values provided by --srcRepo or --destTag will override this value").String()
 	tagArg := kingpin.Flag("tag", "The tag name in the source and the destination. Values provided by --srcTag or --destTag will override this value").Default("latest").String()
 	debugArg := kingpin.Flag("debug", "Enable debug mode.").Bool()
+	quietArg := kingpin.Flag("quiet", "Enable quiet mode.").Bool()
 	timeoutArg := kingpin.Flag("timeout", "Timeout for registry actions").Default("1m").String()
 	kingpin.Parse()
 
@@ -291,6 +293,16 @@ func main() {
 		logrus.Errorf("parsing %s as duration failed: %v", timeout, err)
 		exitCode = -1
 		return
+	}
+
+	logrus.SetLevel(logrus.InfoLevel)
+
+	if *debugArg == true {
+		logrus.SetLevel(logrus.DebugLevel)
+	}
+
+	if *quietArg == true {
+		logrus.SetLevel(logrus.ErrorLevel)
 	}
 
 	if *srcArgs.Repository == "" {
