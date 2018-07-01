@@ -18,119 +18,169 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
-	"github.com/alecthomas/kingpin"
 	"github.com/genuinetools/reg/repoutils"
 	"github.com/jkroepke/reg/registry"
+
+	"github.com/alecthomas/kingpin"
+	"github.com/sirupsen/logrus"
 
 	"github.com/docker/distribution"
 	"github.com/docker/distribution/manifest/schema2"
 )
 
-
 func migrateLayer(srcHub *registry.Registry, destHub *registry.Registry, srcRepo string, destRepo string, layer distribution.Descriptor) error {
 
-	srcHub.Logf("Checking if manifest layer exists in destination registry")
-
 	layerDigest := layer.Digest
+
+	logrus.Debugf("Checking if manifest layer %s exists in destination registry", layerDigest)
+
 	hasLayer, err := destHub.HasLayer(destRepo, layerDigest)
 	if err != nil {
 		return fmt.Errorf("Failure while checking if the destination registry contained an image layer. %v", err)
 	}
 
-	if !hasLayer {
-		fmt.Println("Need to upload layer", layerDigest, "to the destination")
-		read, write := io.Pipe()
+	if hasLayer {
+		logrus.Infof("Layer %s already exists in the destination", layerDigest)
+		return nil
+	}
 
-		go func() error {
-			defer srcImageReader.Close()
-			defer write.Close()
+	logrus.Infof("Upload layer %s to the destination", layerDigest)
 
-			srcImageReader, err := srcHub.DownloadLayer(srcRepo, layerDigest)
-			if err != nil {
-				return fmt.Errorf("Failure while starting the download of an image layer. %v", err)
-			}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	finished := make(chan bool, 1)
+	errChannel := make(chan error, 1)
 
-			io.Copy(write, srcImageReader)
+	read, write := io.Pipe()
 
-			return nil
-		}()
+	go func() {
+		srcImageReader, err := srcHub.DownloadLayer(srcRepo, layerDigest)
+
+		defer write.Close()
+		defer srcImageReader.Close()
+
+		if err != nil {
+			errChannel <- fmt.Errorf("Failure while starting the download of an image layer. %v", err)
+		}
+
+		if _, err = io.Copy(write, srcImageReader); err != nil {
+			errChannel <- fmt.Errorf("Failure while starting the download of an image layer. %v", err)
+		}
+
+		wg.Done()
+	}()
+
+	go func() {
+		defer read.Close()
 
 		err := destHub.UploadLayer(destRepo, layerDigest, read)
+
 		if err != nil {
-			return fmt.Errorf("Failure while uploading the image. %v", err)
+			errChannel <- fmt.Errorf("Failure while uploading the image. %v", err)
+		}
+
+		wg.Done()
+	}()
+
+	go func() {
+		wg.Wait()
+		close(finished)
+	}()
+
+	select {
+	case <-finished:
+	case err := <-errChannel:
+		if err != nil {
+			return err
 		}
 	}
 
-	srcHub.Logf("Layer already exists in the destination")
-	return nil
+	hasLayer, err = destHub.HasLayer(destRepo, layerDigest)
+	if err != nil {
+		return fmt.Errorf("Failure while checking if the destination registry contained an image layer. %v", err)
+	}
 
+	if !hasLayer {
+		return fmt.Errorf("Can't find uploaded layer %s on target registry", layerDigest)
+	}
+
+	return nil
 }
 
-func copyImage(srcHub *registry.Registry, destHub *registry.Registry, srcArgs RepositoryArguments, destArgs RepositoryArguments) (int, error) {
+func copyImage(srcHub *registry.Registry, destHub *registry.Registry, srcArgs RepositoryArguments, destArgs RepositoryArguments) error {
 
 	manifest, err := srcHub.ManifestV2(*srcArgs.Repository, *srcArgs.Tag)
 	if err != nil {
-		return -1, fmt.Errorf("Failed to fetch the manifest for %s/%s:%s. %v", srcHub.URL, *srcArgs.Repository, *srcArgs.Tag, err)
+		return fmt.Errorf("Failed to fetch the manifest for %s/%s:%s. %v", srcHub.URL, *srcArgs.Repository, *srcArgs.Tag, err)
 	}
 
 	deserializedManifest, err := schema2.FromStruct(manifest)
 	if err != nil {
-		return -1, fmt.Errorf("Failed to deserialized the manifest for %s/%s:%s. %v", srcHub.URL, *srcArgs.Repository, *srcArgs.Tag, err)
+		return fmt.Errorf("Failed to deserialized the manifest for %s/%s:%s. %v", srcHub.URL, *srcArgs.Repository, *srcArgs.Tag, err)
 	}
 
 	resp, err := deserializedManifest.MarshalJSON()
 
 	srcHub.Logf(string(resp))
+	if manifest.Config.Digest == "" {
+		return fmt.Errorf("Can't find config manifest for %s/%s:%s", srcHub.URL, *srcArgs.Repository, *srcArgs.Tag)
+	}
+
+	if len(manifest.Layers) == 0 {
+		return fmt.Errorf("Can't find layer manifest for %s/%s:%s", srcHub.URL, *srcArgs.Repository, *srcArgs.Tag)
+	}
+
+	if manifest.SchemaVersion != 2 {
+		return fmt.Errorf("Only SchemaVersion 2 is supported. Wrong manifest for %s/%s:%s", srcHub.URL, *srcArgs.Repository, *srcArgs.Tag)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(len(manifest.Layers))
+	finished := make(chan bool, 1)
+	errChannel := make(chan error, 1)
+
+	for _, layer := range manifest.Layers {
+		go func(layer distribution.Descriptor) {
+			logrus.Infof("Upload layer %s to the destination", layer.Digest)
+			err := migrateLayer(srcHub, destHub, *srcArgs.Repository, *destArgs.Repository, layer)
+
+			if err != nil {
+				errChannel <- fmt.Errorf("Failed to migrate image layer. %v", err)
+			}
+
+			wg.Done()
+		}(layer)
+	}
+
+	go func() {
+		wg.Wait()
+		close(finished)
+	}()
+
+	select {
+	case <-finished:
+	case err := <-errChannel:
+		if err != nil {
+			return err
+		}
+	}
 
 	//Migrate config object first
 	err = migrateLayer(srcHub, destHub, *srcArgs.Repository, *destArgs.Repository, manifest.Config)
 	if err != nil {
-		return -1, fmt.Errorf("Failed to migrate image layer. %v", err)
+		return fmt.Errorf("Failed to migrate config layer. %v", err)
 	}
 
-	quit := make(chan bool)
-	errc := make(chan error)
-	done := make(chan error)
-
-	for _, layer := range manifest.Layers {
-		go func(layer distribution.Descriptor) {
-			srcHub.Logf("Uploading Layer: %s", layer.Digest)
-			err := migrateLayer(srcHub, destHub, *srcArgs.Repository, *destArgs.Repository, layer)
-
-			ch := done // we'll send to done if nil error and to errc otherwise
-			if err != nil {
-				ch = errc
-			}
-			select {
-			case ch <- err:
-				return
-			case <-quit:
-				return
-			}
-		}(layer)
+	err = destHub.PutManifest(*destArgs.Repository, *destArgs.Tag, deserializedManifest)
+	if err != nil {
+		return fmt.Errorf("Failed to upload manifest to %s/%s:%s. %v", destHub.URL, *destArgs.Repository, *destArgs.Tag, err)
 	}
-	count := 0
-	for {
-		select {
-		case err := <-errc:
-			close(quit)
 
-			return -1, fmt.Errorf("Failed to migrate image layer. %v", err)
-		case <-done:
-			count++
-			if count == len(manifest.Layers) {
-				err = destHub.PutManifest(*destArgs.Repository, *destArgs.Tag, deserializedManifest)
-				if err != nil {
-					return -1, fmt.Errorf("Failed to upload manifest to %s/%s:%s. %v", destHub.URL, *destArgs.Repository, *destArgs.Tag, err)
-				}
-
-				fmt.Printf("Copied Docker Image %s:%s successfully.\n", *srcArgs.Repository, *srcArgs.Tag)
-				return 0, nil
-			}
-		}
-	}
+	logrus.Infof("Copied Docker Image %s:%s successfully.", *srcArgs.Repository, *srcArgs.Tag)
+	return nil
 }
 
 type RepositoryArguments struct {
@@ -139,7 +189,6 @@ type RepositoryArguments struct {
 	Tag          *string
 	User         *string
 	Password     *string
-	Timeout      *string
 	Insecure     *bool
 	ForceNoneSsl *bool
 	SkipPing     *bool
@@ -166,10 +215,6 @@ func buildRegistryArguments(argPrefix string, argDescription string) RepositoryA
 	passwordDescription := fmt.Sprintf("Password for %s", argDescription)
 	passwordArg := kingpin.Flag(passwordName, passwordDescription).String()
 
-	timeoutName := fmt.Sprintf("%s-timeout", argPrefix)
-	timeoutDescription := fmt.Sprintf("Timeout for %s", argDescription)
-	timeoutArg := kingpin.Flag(timeoutName, timeoutDescription).Default("1m").String()
-
 	insecureName := fmt.Sprintf("%s-insecure", argPrefix)
 	insecureDescription := fmt.Sprintf("Do not verify tls certificates for %s", argDescription)
 	insecureArg := kingpin.Flag(insecureName, insecureDescription).Bool()
@@ -191,11 +236,10 @@ func buildRegistryArguments(argPrefix string, argDescription string) RepositoryA
 		Insecure:     insecureArg,
 		ForceNoneSsl: forceNonSslArg,
 		SkipPing:     skipPingArg,
-		Timeout:      timeoutArg,
 	}
 }
 
-func connectToRegistry(args RepositoryArguments, debugArg *bool) (*registry.Registry, error) {
+func connectToRegistry(args RepositoryArguments, debugArg *bool, timeoutArg time.Duration) (*registry.Registry, error) {
 
 	url := *args.RegistryURL
 
@@ -209,18 +253,13 @@ func connectToRegistry(args RepositoryArguments, debugArg *bool) (*registry.Regi
 		password = *args.Password
 	}
 
-	timeout, err := time.ParseDuration(*args.Timeout)
-	if err != nil {
-		return nil, fmt.Errorf("parsing %s as duration failed: %v", timeout, err)
-	}
-
 	auth, err := repoutils.GetAuthConfig(username, password, *args.RegistryURL)
 
 	registry, err := registry.New(auth, registry.Opt{
 		Insecure: *args.Insecure,
 		Debug:    *debugArg,
 		SkipPing: *args.SkipPing,
-		Timeout:  timeout,
+		Timeout:  timeoutArg,
 	})
 
 	if err != nil {
@@ -237,11 +276,19 @@ func main() {
 	}()
 
 	srcArgs := buildRegistryArguments("src", "source")
-	destArgs := buildRegistryArguments("dest", "destiation")
-	repoArg := kingpin.Flag("repo", "The repository in the source and the destiation. Values provided by --srcRepo or --destTag will override this value").String()
-	tagArg := kingpin.Flag("tag", "The tag name in the source and the destiation. Values provided by --srcTag or --destTag will override this value").Default("latest").String()
+	destArgs := buildRegistryArguments("dest", "destination")
+	repoArg := kingpin.Flag("repo", "The repository in the source and the destination. Values provided by --srcRepo or --destTag will override this value").String()
+	tagArg := kingpin.Flag("tag", "The tag name in the source and the destination. Values provided by --srcTag or --destTag will override this value").Default("latest").String()
 	debugArg := kingpin.Flag("debug", "Enable debug mode.").Bool()
+	timeoutArg := kingpin.Flag("timeout", "Timeout for registry actions").Default("1m").String()
 	kingpin.Parse()
+
+	timeout, err := time.ParseDuration(*timeoutArg)
+	if err != nil {
+		logrus.Errorf("parsing %s as duration failed: %v", timeout, err)
+		exitCode = -1
+		return
+	}
 
 	if *srcArgs.Repository == "" {
 		srcArgs.Repository = repoArg
@@ -258,34 +305,34 @@ func main() {
 	}
 
 	if *srcArgs.Repository == "" {
-		fmt.Printf("A source repository name is required either with --srcRepo or --repo\n")
+		logrus.Errorf("A source repository name is required either with --src-repo or --repo")
 		exitCode = -1
 		return
 	}
 
 	if *destArgs.Repository == "" {
-		fmt.Printf("A destiation repository name is required either with --destRepo or --repo\n")
+		logrus.Errorf("A destination repository name is required either with --dest-repo or --repo")
 		exitCode = -1
 		return
 	}
 
-	srcHub, err := connectToRegistry(srcArgs, debugArg)
+	srcHub, err := connectToRegistry(srcArgs, debugArg, timeout)
 	if err != nil {
-		fmt.Printf("Failed to establish a connection to the source registry. %v\n", err)
+		logrus.Errorf("Failed to establish a connection to the source registry. %v", err)
 		exitCode = -1
 		return
 	}
 
-	destHub, err := connectToRegistry(destArgs, debugArg)
+	destHub, err := connectToRegistry(destArgs, debugArg, timeout)
 	if err != nil {
-		fmt.Printf("Failed to establish a connection to the destination registry. %v\n", err)
+		logrus.Errorf("Failed to establish a connection to the destination registry. %v", err)
 		exitCode = -1
 		return
 	}
 
-	_, err = copyImage(srcHub, destHub, srcArgs, destArgs)
+	err = copyImage(srcHub, destHub, srcArgs, destArgs)
 	if err != nil {
-		fmt.Printf("An error occured: %s\n", err)
+		logrus.Errorf("An error occured: %s", err)
 		exitCode = -1
 		return
 	}
