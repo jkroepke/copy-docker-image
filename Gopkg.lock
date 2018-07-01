@@ -198,7 +198,7 @@
   branch = "copy-docker-image"
   name = "github.com/jkroepke/reg"
   packages = ["registry"]
-  revision = "28044574da4b8c79eca551171b00af40931f2edd"
+  revision = "6a6cdaa37e778a03674271338c575534752810eb"
 
 [[projects]]
   name = "github.com/matttproud/golang_protobuf_extensions"
