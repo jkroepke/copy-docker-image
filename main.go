@@ -260,6 +260,9 @@ func connectToRegistry(args RepositoryArguments, debugArg *bool, timeoutArg time
 		Debug:    *debugArg,
 		SkipPing: *args.SkipPing,
 		Timeout:  timeoutArg,
+		Headers: map[string]string{
+			"User-Agent": "docker/master copy-docker-image/2",
+		},
 	})
 
 	if err != nil {

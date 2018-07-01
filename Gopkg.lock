@@ -195,10 +195,10 @@
   version = "v1.6.2"
 
 [[projects]]
-  branch = "auth_upload"
+  branch = "copy-docker-image"
   name = "github.com/jkroepke/reg"
   packages = ["registry"]
-  revision = "0eeb9718945ae015afded10def86eaff51257b66"
+  revision = "28044574da4b8c79eca551171b00af40931f2edd"
 
 [[projects]]
   name = "github.com/matttproud/golang_protobuf_extensions"
@@ -308,6 +308,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "cb6cf076719c43682c7a279386f9401b8e55bd17c36b25207336466af1d92448"
+  inputs-digest = "1d4d83324b454ea74e560a88183ad6630cfcd0b01704ea045cceb4f053c3c015"
   solver-name = "gps-cdcl"
   solver-version = 1
