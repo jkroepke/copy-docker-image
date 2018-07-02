@@ -1,5 +1,5 @@
 # move-docker-image - Copy docker images without a full docker installation
-[![Build Status](https://travis-ci.org/mdlavin/copy-docker-image.svg?branch=master)](https://travis-ci.org/mdlavin/copy-docker-image)
+[![Build Status](https://travis-ci.org/jkroepke/copy-docker-image.svg?branch=master)](https://travis-ci.org/jkroepke/copy-docker-image)
 
 ## Overview
 
@@ -8,23 +8,21 @@ When doing automated deployments, especially when using AWS ECR in multiple acco
 To copy an image between two anonymous repositories, you can use a command line like:
 
 ```
-$ copy-docker-image --srcRepo http://registry1/ --destRepo http://registry2 --repo project
+$ copy-docker-image --src-repo http://registry1/ --dest-repo http://registry2 --repo project
 ```
 
 To specify an image tag, just add a --tag argument like:
 
 ```
-$ copy-docker-image --srcRepo http://registry1/ --destRepo http://registry2 --repo project --tag v1
+$ copy-docker-image --src-repo http://registry1/ --dest-repo http://registry2 --repo project --tag v1
 ```
 
-## Integration with AWS ECR
-
-Because copy to AWS ECR was common a special URL format was added to automatically look up the right HTTPS URL and authorization token. Assuming a AWS CLI profile has been created for your account you can use a command like:
+To get an image from a private registry
 
 ```
-$ copy-docker-image --srcRepo http://registry1/ --destRepo ecr:<account-id> --repo project
+$ copy-docker-image --src-repo http://registry1/ --src-user Username --src-password Password --dest-repo http://registry2 --repo project --tag v1
 ```
- 
+
 ## Installation
 
-Pre-built binaries for tagged releases are available on the [releases page](https://github.com/mdlavin/copy-docker-image/releases).
+Pre-built binaries for tagged releases are available on the [releases page](https://github.com/jkroepke/copy-docker-image/releases).
