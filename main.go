@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/genuinetools/reg/repoutils"
-	"github.com/jkroepke/reg/registry"
+	"github.com/genuinetools/reg/registry"
 
 	"github.com/alecthomas/kingpin"
 	"github.com/sirupsen/logrus"

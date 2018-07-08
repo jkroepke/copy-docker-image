@@ -30,8 +30,8 @@
   version = "2.2.3"
 
 [[constraint]]
-  name = "github.com/jkroepke/reg"
-  branch = "copy-docker-image"
+  name = "github.com/genuinetools/reg"
+  branch = "master"
 
 # https://github.com/genuinetools/reg/blob/master/Gopkg.toml
 

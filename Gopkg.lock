@@ -63,7 +63,7 @@
     "cli/config/credentials",
     "opts"
   ]
-  revision = "34ba66b0c5a81d965a1f8d1c9d4dbea01e52ea3b"
+  revision = "2b221d8f1cd6420122634a4922fef30313659d78"
 
 [[projects]]
   branch = "master"
@@ -118,20 +118,19 @@
     "registry",
     "registry/resumable"
   ]
-  revision = "8d1b280a2544c4692b72f80a4265102e111743a4"
+  revision = "d4bbd7938a533567182a07e13d1daf1d271a1bcb"
 
 [[projects]]
   branch = "master"
   name = "github.com/docker/docker-ce"
   packages = ["components/cli/cli/config"]
-  revision = "a72ff1622367e486960dafd485bf45b7a0339af5"
+  revision = "69398f8dbbdd5703ec9b109a8f8d9795b4d846a2"
 
 [[projects]]
   name = "github.com/docker/docker-credential-helpers"
   packages = [
     "client",
-    "credentials",
-    "pass"
+    "credentials"
   ]
   revision = "5241b46610f2491efdf9d1c85f1ddf5b02f6d962"
   version = "v0.6.1"
@@ -165,10 +164,13 @@
   revision = "aabc10ec26b754e797f9028f4589c5b7bd90dc20"
 
 [[projects]]
+  branch = "master"
   name = "github.com/genuinetools/reg"
-  packages = ["repoutils"]
-  revision = "d25a2c83ae5414c8a72f2e1ab96529fb1744fe26"
-  version = "v0.14.1"
+  packages = [
+    "registry",
+    "repoutils"
+  ]
+  revision = "74603b6d47a08e9f347442a7f787acbb70bf4883"
 
 [[projects]]
   name = "github.com/gogo/protobuf"
@@ -193,12 +195,6 @@
   packages = ["."]
   revision = "e3702bed27f0d39777b0b37b664b6280e8ef8fbf"
   version = "v1.6.2"
-
-[[projects]]
-  branch = "copy-docker-image"
-  name = "github.com/jkroepke/reg"
-  packages = ["registry"]
-  revision = "9a7c9dd0f9d836dc6a5e93b0fc6a149486fec294"
 
 [[projects]]
   name = "github.com/matttproud/golang_protobuf_extensions"
@@ -273,7 +269,7 @@
     "nfs",
     "xfs"
   ]
-  revision = "40f013a808ec4fa79def444a1a56de4d1727efcb"
+  revision = "ae68e2d4c00fed4943b5f6698d504a5fe083da8a"
 
 [[projects]]
   name = "github.com/sirupsen/logrus"
@@ -294,7 +290,7 @@
     "internal/socks",
     "proxy"
   ]
-  revision = "4cb1c02c05b0e749b0365f61ae859a8e0cfceed9"
+  revision = "32a936f46389aa10549d60bd7833e54b01685d09"
 
 [[projects]]
   branch = "master"
@@ -303,11 +299,11 @@
     "unix",
     "windows"
   ]
-  revision = "7138fd3d9dc8335c567ca206f4333fb75eb05d56"
+  revision = "3c6ecd8f22c6f40fbeec94c000a069d7d87c7624"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "1d4d83324b454ea74e560a88183ad6630cfcd0b01704ea045cceb4f053c3c015"
+  inputs-digest = "330e651e7ddb7519266843aab332267558f4d0577a6db9d18394bab25aaaeac9"
   solver-name = "gps-cdcl"
   solver-version = 1
