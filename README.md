@@ -1,3 +1,5 @@
+# Deprecated! Just use [skopeo copy](https://github.com/containers/skopeo#copying-images)
+
 # move-docker-image - Copy docker images without a full docker installation
 [![Build Status](https://travis-ci.org/jkroepke/copy-docker-image.svg?branch=master)](https://travis-ci.org/jkroepke/copy-docker-image)
 
